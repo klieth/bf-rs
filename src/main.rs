@@ -1,172 +1,61 @@
 use clap::{
     App,
-    //Arg,
+    Arg,
+};
+use std::io::Read;
+
+mod error;
+mod input;
+mod interpreter;
+
+use input::InputSource;
+use interpreter::{
+    DebugInterpreter,
+    Interpreter,
+    OptimizingInterpreter,
 };
 
-#[derive(Debug)]
-enum Command {
-    Plus,
-    Minus,
-    Right,
-    Left,
-    Input,
-    Output,
-    Loop(Program),
-}
-
-struct Program {
-    commands: Vec<Command>,
-}
-
-impl std::fmt::Debug for Program {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "<Program cmds={}>", self.commands.len())
-    }
-}
-
-impl Program {
-    fn parse(input: Vec<u8>) -> Self {
-        let mut iter = input.into_iter().peekable();
-        Self::parse_internal(&mut iter)
-    }
-
-    fn parse_internal<I>(input: &mut std::iter::Peekable<I>) -> Self where I: Iterator<Item = u8> {
-        let mut commands = Vec::new();
-
-        while let Some(chr) = input.next() {
-            let command = match chr as char {
-                '+' => Command::Plus,
-                '-' => Command::Minus,
-                '>' => Command::Right,
-                '<' => Command::Left,
-                '[' => Command::Loop(Self::parse_internal(input)),
-                ']' => break,
-                ',' => Command::Input,
-                '.' => Command::Output,
-                _ => continue,
-            };
-            commands.push(command);
-        }
-
-        Program {
-            commands,
-        }
-    }
-
-    fn run<I: Iterator<Item = u8>>(&self, tape: &mut Vec<u8>, ptr: &mut usize, stdin: &mut I, stdout: &mut String) {
-        for command in self.commands.iter() {
-            // ensure ptr is pointing to valid memory
-            // TODO: move this and the check inside the Loop into a tape wrapper so that this is
-            // automatically checked on a get() or get_mut() call
-            if *ptr >= tape.len() {
-                tape.resize(*ptr + 1, 0);
-            }
-
-            match command {
-                Command::Plus => {
-                    if let Some(val) = tape.get_mut(*ptr) {
-                        *val = val.wrapping_add(1);
-                    } else {
-                        panic!("memory location invalid: {}", ptr);
-                    }
-                }
-                Command::Minus => {
-                    if let Some(val) = tape.get_mut(*ptr) {
-                        *val = val.wrapping_sub(1);
-                    } else {
-                        panic!("memory location invalid: {}", ptr);
-                    }
-                },
-                Command::Right => {
-                    *ptr += 1;
-                },
-                Command::Left => {
-                    *ptr -= 1;
-                },
-                Command::Input => {
-                    if let Some(val) = tape.get_mut(*ptr) {
-                        if let Some(i) = stdin.next() {
-                            *val = i;
-                        } else {
-                            panic!("EOF on stdin");
-                        }
-                    } else {
-                        panic!("memory location invalid: {}", ptr);
-                    }
-                },
-                Command::Output => {
-                    if let Some(val) = tape.get(*ptr) {
-                        stdout.push(*val as char);
-                    } else {
-                        panic!("memory location invalid: {}", ptr);
-                    }
-                },
-                Command::Loop(prog) => {
-                    loop {
-                        if let Some(val) = tape.get(*ptr) {
-                            if *val != 0 {
-                                prog.run(tape, ptr, stdin, stdout);
-                            } else {
-                                break;
-                            }
-                        } else {
-                            panic!("memory location invalid: {}", ptr);
-                        }
-
-                        // It's possible for the loop to end on an uninitialized cell, so we have
-                        // to check this again before the next loop instance.
-                        if *ptr >= tape.len() {
-                            tape.resize(*ptr + 1, 0);
-                        }
-                    }
-                },
-            }
-        }
-    }
-}
-
-struct Interpreter {
-    program: Program,
-    tape: Vec<u8>,
-    ptr: usize,
-}
-
-impl Interpreter {
-    fn new(code: Vec<u8>) -> Self {
-        let program = Program::parse(code);
-
-        Interpreter {
-            program,
-            tape: vec![],
-            ptr: 0,
-        }
-    }
-
-    fn run<I: Iterator<Item = u8>>(&mut self, mut stdin: I) -> String {
-        let mut output = String::new();
-
-        self.program.run(&mut self.tape, &mut self.ptr, &mut stdin, &mut output);
-
-        output
-    }
-
-}
 
 fn main() -> Result<(), String> {
-    let _ = App::new("Brainfuck interpreter")
+    let matches = App::new("Brainfuck interpreter")
         .version("0.1")
+        .arg(Arg::with_name("debug")
+            .short("d")
+            .long("debug"))
+        .arg(Arg::with_name("infile")
+            .short("i")
+            .long("infile")
+            .help("File used as stdin for the running program. Default or '-' uses stdin from the interpreter.")
+            .takes_value(true)
+            .value_name("INPUT FILE"))
+        .arg(Arg::with_name("program")
+            .help("File containing the program to run.")
+            .takes_value(true)
+            .required(true)
+            .value_name("PROGRAM FILE"))
         .get_matches();
 
-    use std::io::Read;
+    let mut code_source = input::parse_input_source(matches.value_of("program"))?;
+    let mut stdin_source = input::parse_input_source(matches.value_of("infile"))?;
+
+    if let InputSource::Stdin = code_source {
+        return Err("Must specify filename for code. Can't read from stdin".to_string());
+    }
+
     let mut code = Vec::new();
-    let bytes_read = std::io::stdin().read_to_end(&mut code)
+    let bytes_read = code_source.read_to_end(&mut code)
         .map_err(|e| format!("{:?}", e))?;
     println!("Read {} bytes of code", bytes_read);
 
-    let mut interpreter = Interpreter::new(code);
+    let output = if matches.is_present("debug") {
+        let mut interpreter = DebugInterpreter::new(code);
 
-    let output = interpreter.run(std::iter::empty());
+        interpreter.run(&mut stdin_source).map_err(|e| format!("{}", e))?
+    } else {
+        let mut interpreter = OptimizingInterpreter::new(code);
 
+        interpreter.run(&mut stdin_source).map_err(|e| format!("{}", e))?
+    };
     println!("{}", output);
     Ok( () )
 }
@@ -178,8 +67,8 @@ mod test {
     #[test]
     fn test_works() {
         let input = b"+[-[<<[+[--->]-[<<<]]]>>>-]>-.---.>..>.<<<<-.<+.>>>>>.>.<<.<-.";
-        let mut interpreter = Interpreter::new(input.to_vec());
-        let output = interpreter.run(std::iter::empty());
+        let mut interpreter = OptimizingInterpreter::new(input.to_vec());
+        let output = interpreter.run(&mut InputSource::Empty).expect("Failed to run");
         assert_eq!(output, "hello world");
     }
 }

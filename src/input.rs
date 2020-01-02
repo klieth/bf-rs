@@ -27,7 +27,9 @@ impl Read for InputSource {
 pub fn parse_input_source(value: Option<&str>) -> Result<InputSource, String> {
     match value {
         Some("-") | None => Ok(InputSource::Stdin),
-        Some(path) => std::fs::File::open(path).map_err(|e| format!("failed to open file: {}", e)).map(|f| InputSource::File(f))
+        Some(path) => std::fs::File::open(std::fs::canonicalize(path)
+            .map_err(|e| format!("failed to build absolute path to file: {}", e))?)
+            .map_err(|e| format!("failed to open file: {}", e)).map(|f| InputSource::File(f))
     }
 }
 

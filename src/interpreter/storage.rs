@@ -6,13 +6,6 @@ use std::fmt::{
 
 use super::program::Command;
 
-use crate::{
-    error::{
-        ProgramError,
-        ProgramResult,
-    },
-};
-
 const SANITY_LIMIT: usize = 4096;
 
 fn ensure_sized(vec: &mut Vec<u8>, size: usize) {
@@ -38,24 +31,24 @@ impl Storage {
         }
     }
 
-    pub fn get_mut(&mut self) -> Option<&mut u8> {
+    pub fn get_mut(&mut self) -> &mut u8 {
         ensure_sized(&mut self.tape, self.ptr);
 
-        self.tape.get_mut(self.ptr)
+        self.tape.get_mut(self.ptr).expect("Uncaught memory overflow in get_mut()")
     }
 
-    pub fn get(&mut self) -> Option<&u8> {
+    pub fn get(&mut self) -> &u8 {
         ensure_sized(&mut self.tape, self.ptr);
 
-        self.tape.get(self.ptr)
+        self.tape.get(self.ptr).expect("Uncaught memory overflow in get()")
     }
 
-    pub fn set(&mut self, val: u8) -> ProgramResult<()> {
-        self.get_mut().map(|v| *v = val)
-            .ok_or(ProgramError::MemoryError)
+    pub fn set(&mut self, val: u8) {
+        let v = self.get_mut();
+        *v = val;
     }
 
-    pub fn command(&mut self, command: &Command) -> ProgramResult<()> {
+    pub fn command(&mut self, command: &Command) {
         match command {
             Command::Plus => self.inc_mem(),
             Command::Minus => self.dec_mem(),
@@ -65,29 +58,47 @@ impl Storage {
         }
     }
 
-    pub fn inc_mem(&mut self) -> ProgramResult<()> {
-        self.get_mut().map(|v| *v = v.wrapping_add(1))
-            .ok_or(ProgramError::MemoryError)
+    pub fn inc_mem(&mut self) {
+        let v = self.get_mut();
+        *v = v.wrapping_add(1);
     }
 
-    pub fn dec_mem(&mut self) -> ProgramResult<()> {
-        self.get_mut().map(|v| *v = v.wrapping_sub(1))
-            .ok_or(ProgramError::MemoryError)
+    pub fn dec_mem(&mut self) {
+        let v = self.get_mut();
+        *v = v.wrapping_sub(1);
     }
 
-    pub fn inc_ptr(&mut self) -> ProgramResult<()> {
+    pub fn inc_ptr(&mut self) {
         self.ptr += 1;
-        Ok( () )
     }
 
-    pub fn dec_ptr(&mut self) -> ProgramResult<()> {
+    pub fn dec_ptr(&mut self) {
         self.ptr -= 1;
-        Ok( () )
     }
 }
 
+const VIEW_OFFSET: usize = 10;
+
 impl Display for Storage {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "[Storage size={} ptr={}]", self.tape.len(), self.ptr)
+        writeln!(f, "[Storage size={} ptr={}]", self.tape.len(), self.ptr)?;
+
+        let min = if self.ptr >= VIEW_OFFSET { self.ptr - VIEW_OFFSET } else { 0 };
+        let max = if self.tape.len() > VIEW_OFFSET && self.ptr <= self.tape.len() - VIEW_OFFSET {
+            self.ptr + VIEW_OFFSET
+        } else {
+            self.tape.len()
+        };
+        let indicator = self.ptr - min;
+
+        for item in min..max {
+            let prefix = if indicator == item { '>' } else { ' ' };
+            write!(f, "{}{:^4} ", prefix, item)?;
+        }
+        write!(f, "\n")?;
+        for item in self.tape[min..max].iter() {
+            write!(f, " {:^4} ", item)?;
+        }
+        Ok(())
     }
 }

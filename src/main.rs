@@ -10,11 +10,8 @@ mod interpreter;
 
 use input::InputSource;
 use interpreter::{
-    DebugInterpreter,
     Interpreter,
-    OptimizingInterpreter,
 };
-
 
 fn main() -> Result<(), String> {
     let matches = App::new("Brainfuck interpreter")
@@ -47,14 +44,15 @@ fn main() -> Result<(), String> {
         .map_err(|e| format!("{:?}", e))?;
     println!("Read {} bytes of code", bytes_read);
 
+    let mut interpreter = Interpreter::new(code);
+
     let output = if matches.is_present("debug") {
-        let mut interpreter = DebugInterpreter::new(code);
-
-        interpreter.run(&mut stdin_source).map_err(|e| format!("{}", e))?
+        if let InputSource::Stdin = stdin_source {
+            return Err("Can't use stdin for program in debug mode".to_string());
+        }
+        interpreter.run::<interpreter::Debug>(&mut stdin_source).map_err(|e| format!("{}", e))?
     } else {
-        let mut interpreter = OptimizingInterpreter::new(code);
-
-        interpreter.run(&mut stdin_source).map_err(|e| format!("{}", e))?
+        interpreter.run::<interpreter::Normal>(&mut stdin_source).map_err(|e| format!("{}", e))?
     };
     println!("{}", output);
     Ok( () )
@@ -67,8 +65,8 @@ mod test {
     #[test]
     fn test_works() {
         let input = b"+[-[<<[+[--->]-[<<<]]]>>>-]>-.---.>..>.<<<<-.<+.>>>>>.>.<<.<-.";
-        let mut interpreter = OptimizingInterpreter::new(input.to_vec());
-        let output = interpreter.run(&mut InputSource::Empty).expect("Failed to run");
+        let mut interpreter = Interpreter::new(input.to_vec());
+        let output = interpreter.run::<interpreter::Normal>(&mut InputSource::Empty).expect("Failed to run");
         assert_eq!(output, "hello world");
     }
 }

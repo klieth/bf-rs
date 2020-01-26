@@ -29,8 +29,8 @@ bf-rs -d -i input.txt [program file]
 ```
 
 Some of the comamnds are:
-`re` - run to the end of the program
-`rle` - run to the end of the current loop
-`rli` - run to the end of the current loop iteration
-`r<#>` - run the specified number of steps before breaking. For exmaple, `r30` would run 30 steps.
-`s` - step to the next command.
+* `re`: run to the end of the program
+* `rle`: run to the end of the current loop
+* `rli`: run to the end of the current loop iteration
+* `r<#>`: run the specified number of steps before breaking. For exmaple, `r30` would run 30 steps.
+* `s`: step to the next command.
